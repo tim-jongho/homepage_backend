@@ -1,8 +1,9 @@
 /* 홈페이지 게시판 읽기 API — DB(articles, article_attachments) 를 사이트에 노출. 공개 읽기 전용: is_published 이고 삭제되지 않은 글만.
    실행: npm install && npm start   (PORT 기본 3001, Node >= 20.12). 개발 중 자동 재시작은 npm run dev
-   운영: pm2 start ecosystem.config.js (호스트 3.34.106.39:3001). 설정은 이 폴더의 .env (POSTGRES_HOST/USER/PASSWORD/DB, .env.example 참고)
-   GET /api/articles?category=customsnews   목록 (no 내림차순, 본문 제외)
-   GET /api/articles/:category/:no          본문 + 첨부 [{filename, url}]
+   운영: pm2 start ecosystem.config.js → nginx 가 https://api.aonecustoms.com/homepage-api/ 를 127.0.0.1:3001 로 프록시. 설정은 이 폴더의 .env
+   GET /articles?category=customsnews   목록 (no 내림차순, 본문 제외)
+   GET /articles/:category/:no          본문 + 첨부 [{filename, url}]
+   운영 URL 은 https://api.aonecustoms.com/homepage-api/articles?... (/homepage-api 접두어가 붙어 와도 처리)
 */
 const path = require("path");
 const express = require("express");
@@ -15,13 +16,14 @@ const CATEGORIES = ["aonenews", "customsnews", "ceocolumn"];
 const CDN = "https://aonecustoms-cdn.s3.ap-northeast-2.amazonaws.com/";
 const LIVE = "is_published and deleted_at is null";
 const app = express();
+const api = express.Router();
 
 app.use((req, res, next) => {
   res.set({ "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=60" });
   next();
 });
 
-app.get("/api/articles", async (req, res) => {
+api.get("/articles", async (req, res) => {
   const { category } = req.query;
   if (!CATEGORIES.includes(category)) return res.status(400).json({ error: "category: " + CATEGORIES.join(" | ") });
   const { rows } = await pool.query(
@@ -29,7 +31,7 @@ app.get("/api/articles", async (req, res) => {
   res.json(rows);
 });
 
-app.get("/api/articles/:category/:no", async (req, res) => {
+api.get("/articles/:category/:no", async (req, res) => {
   const { category } = req.params, no = Number(req.params.no);
   if (!CATEGORIES.includes(category) || !Number.isInteger(no)) return res.status(404).json({ error: "not found" });
   const { rows: [a] } = await pool.query(
@@ -42,6 +44,10 @@ app.get("/api/articles/:category/:no", async (req, res) => {
   res.json({ ...article, attached: att.map(x => ({ filename: x.filename, url: CDN + x.s3_key.split("/").map(encodeURIComponent).join("/") })) });
 });
 
+// nginx 가 /homepage-api/ 접두어를 떼고 넘기면(proxy_pass ...:3001/) 두 번째, 그대로 넘기면 첫 번째 마운트가 받음
+app.use("/homepage-api", api);
+app.use("/", api);
+app.use((req, res) => res.status(404).json({ error: "not found" }));
 app.use((err, req, res, next) => { console.error(err); res.status(500).json({ error: "server error" }); });  // eslint-disable-line no-unused-vars
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`api on :${port}`));

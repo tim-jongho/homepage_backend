@@ -1,27 +1,41 @@
 # homepage_backend
 
-관세법인 에이원 홈페이지 게시판 읽기 API. PostgreSQL(articles, article_attachments) → JSON. 프론트는 ../homepage (CRA, CloudFront).
+관세법인 에이원 홈페이지 게시판 읽기 API. PostgreSQL(articles, article_attachments) → JSON. 프론트는 ../homepage (CRA, CloudFront https://www.aonecustoms.com).
 
-- `GET /api/articles?category=aonenews|customsnews|ceocolumn` 목록 (no 내림차순, 본문 제외)
-- `GET /api/articles/:category/:no` 본문 + 첨부 `[{filename, url}]`
+운영 주소: `https://api.aonecustoms.com/homepage-api/` (nginx → 127.0.0.1:3001)
+
+- `GET /articles?category=aonenews|customsnews|ceocolumn` 목록 (no 내림차순, 본문 제외)
+- `GET /articles/:category/:no` 본문 + 첨부 `[{filename, url}]`
 - 공개 읽기 전용: `is_published` 이고 `deleted_at` 이 null 인 글만. CORS 전체 허용, `Cache-Control: max-age=60`
+- `/homepage-api` 접두어가 붙은 채로 들어와도 같은 라우트가 처리하므로 nginx 가 접두어를 떼든 말든 동작
 
 ## 실행
 
 ```
 cp .env.example .env   # POSTGRES_* 채우기
 npm install
-npm start              # http://localhost:3001   (개발: npm run dev = 파일 변경 시 재시작)
+npm start              # http://localhost:3001/articles?category=ceocolumn   (개발: npm run dev = 파일 변경 시 재시작)
 ```
 
-## 운영 (3.34.106.39, pm2)
+## 운영 (3.34.106.39, pm2 + nginx)
 
 ```
 npm ci --omit=dev
 pm2 start ecosystem.config.js && pm2 save && pm2 startup
-curl "http://127.0.0.1:3001/api/articles?category=ceocolumn"
+curl "http://127.0.0.1:3001/articles?category=ceocolumn"
 ```
 
-- Node 20.12 이상. 보안그룹 인바운드 3001 필요.
+nginx (api.aonecustoms.com 의 server 블록 안). 앱은 401 을 내지 않으므로 401 이 나오면 nginx 의 auth 설정을 확인:
+
+```
+location /homepage-api/ {
+    proxy_pass http://127.0.0.1:3001/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+- Node 20.12 이상. 3001 은 외부에 열 필요 없음 (nginx 만 443).
 - DB 서버(43.202.250.112)의 5432 에 이 서버 IP 허용 필요.
-- 프론트가 https://www.aonecustoms.com 이라 브라우저는 http API 를 직접 못 부름 → CloudFront `/api/*` 동작(도메인 필요) 또는 API 앞 HTTPS 도메인.
+- 확인: `curl "https://api.aonecustoms.com/homepage-api/articles?category=ceocolumn"`
